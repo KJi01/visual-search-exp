@@ -476,7 +476,7 @@ function genTrials(highProbLoc, isPractice = false) {
     return trials;
 }
 
-// 完成试次参数（对应原finalize_trial）
+// 完成试次参数（对应原finalize_trial）- 修复版
 function finalizeTrial(info) {
     const p = { ...info };
     if (p.dist_present) {
@@ -484,13 +484,17 @@ function finalizeTrial(info) {
             const possible = [0,1,2,3].filter(x => x !== p.dist_loc);
             p.target_loc = possible[Math.floor(Math.random() * possible.length)];
         }
+        // 确保 target_filler 有值
+        if (!p.target_filler) {
+            p.target_filler = Math.random() < 0.5 ? 'left' : 'right';
+        }
         p.target_color = p.dist_color === 'green' ? 'red' : 'green';
         p.target_shape = p.dist_shape === 'circle' ? 'diamond' : 'circle';
         p.congruent = (p.target_filler === p.dist_filler) ? 1 : 0;
     } else {
         p.congruent = -1;
         if (p.target_loc === null) p.target_loc = Math.floor(Math.random() * 4);
-        if (p.target_shape === null) {
+        if (!p.target_shape) {
             p.target_shape = Math.random() < 0.5 ? 'circle' : 'diamond';
             p.target_color = Math.random() < 0.5 ? 'green' : 'red';
             p.target_filler = Math.random() < 0.5 ? 'left' : 'right';
@@ -556,11 +560,12 @@ const instructions = {
     show_clickable_nav: false
 };
 
-// 生成试次的时间轴
+// 生成试次的时间轴 - 修复数据保存问题
 function createTrialTimeline(trials, isPractice = false, blockNum = 0) {
     const timeline = [];
     let correctCount = 0;
     let practiceSwitch = new SwitchMetrics();
+    let currentTrialData = null; // 用于存储当前试次数据
     
     trials.forEach((trialInfo, idx) => {
         // 注视点
@@ -576,17 +581,22 @@ function createTrialTimeline(trials, isPractice = false, blockNum = 0) {
         const stimulus = {
             type: jsPsychHtmlKeyboardResponse,
             stimulus: function() {
-                const p = finalizeTrial(trialInfo);
+                // 生成试次参数并保存到全局变量
+                currentTrialData = finalizeTrial(trialInfo);
                 const display = createDisplayHTML(
-                    p.target_loc, p.target_shape, p.target_color, p.target_filler,
-                    p.dist_present, p.dist_loc, p.dist_shape, p.dist_color, p.dist_filler
+                    currentTrialData.target_loc, 
+                    currentTrialData.target_shape, 
+                    currentTrialData.target_color, 
+                    currentTrialData.target_filler,
+                    currentTrialData.dist_present, 
+                    currentTrialData.dist_loc, 
+                    currentTrialData.dist_shape, 
+                    currentTrialData.dist_color, 
+                    currentTrialData.dist_filler
                 );
                 
-                // 保存当前试次参数供后续使用
-                jsPsych.data.get().addToLast({
-                    current_trial: p,
-                    fillers: display.fillers
-                });
+                // 保存填充信息到全局变量
+                currentTrialData.fillers = display.fillers;
                 
                 return display.html;
             },
@@ -594,8 +604,15 @@ function createTrialTimeline(trials, isPractice = false, blockNum = 0) {
             trial_duration: PARAMS.MAX_RESPONSE_TIME,
             response_ends_trial: true,
             on_finish: function(data) {
-                const p = jsPsych.data.get().last(1).values()[0].current_trial;
-                const fillers = jsPsych.data.get().last(1).values()[0].fillers;
+                // 使用全局变量中的试次数据
+                const p = currentTrialData;
+                
+                if (!p) {
+                    console.error('Missing trial data');
+                    return;
+                }
+                
+                const fillers = p.fillers;
                 
                 // 判断反应
                 const correctKey = p.target_filler === 'left' ? PARAMS.KEY_LEFT : PARAMS.KEY_RIGHT;
@@ -671,6 +688,9 @@ function createTrialTimeline(trials, isPractice = false, blockNum = 0) {
                 
                 dataSaver.addTrial(trialData);
                 if (correct) correctCount++;
+                
+                // 清空当前试次数据
+                currentTrialData = null;
             }
         };
         
