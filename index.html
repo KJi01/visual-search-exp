@@ -698,37 +698,27 @@ function createTrialTimeline(trials, isPractice = false, blockNum = 0) {
     return timeline;
 }
 
-// 练习模块
+// 练习模块 - 修复版：简化逻辑，移除有问题的 loop_function
 const practiceBlock = {
-    timeline: function() {
-        const trials = genTrials(highProbLoc, true);
-        return createTrialTimeline(trials, true);
-    },
-    loop_function: function(data) {
-        // 计算准确率
-        const practiceData = data.values().filter(d => d.phase !== 'fixation' && d.correct !== undefined);
-        const correct = practiceData.filter(d => d.correct).length;
-        const total = practiceData.length;
-        const acc = total > 0 ? (correct / total * 100) : 0;
-        
-        console.log(`练习准确率: ${acc.toFixed(1)}%`);
-        
-        // 检查是否跳过
-        const skipped = practiceData.some(d => d.skipped);
-        if (skipped) return false;
-        
-        // 准确率≥80%则退出循环
-        return acc < 80;
-    },
-    on_start: function() {
-        // 显示练习提示
-        jsPsych.getDisplayElement().innerHTML = `
-            <div style="color: white; text-align: center; font-size: 28px; padding-top: 40vh;">
+    timeline: [
+        {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: `<div style="color: white; text-align: center; font-size: 28px; padding-top: 40vh;">
                 开始练习<br><br>
-                <span style="font-size: 20px; color: #aaa;">按 Tab 可跳过练习</span>
-            </div>
-        `;
-    }
+                <span style="font-size: 20px; color: #aaa;">按空格键开始练习</span>
+            </div>`,
+            choices: [' ']
+        },
+        ...createTrialTimeline(genTrials(highProbLoc, true), true, 0),
+        {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: `<div style="color: white; text-align: center; font-size: 28px; padding-top: 40vh;">
+                练习结束<br><br>
+                <span style="color: #0f0;">按空格键开始正式实验</span>
+            </div>`,
+            choices: [' ']
+        }
+    ]
 };
 
 // 正式实验前提示
