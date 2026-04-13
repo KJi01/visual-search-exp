@@ -15,25 +15,35 @@
     
     <style>
         body { margin: 0; overflow: hidden; background: black; }
-        .experiment-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
         
-        /* 刺激样式 */
-        .stimulus-display {
-            position: relative;
-            width: 600px;
-            height: 600px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+        /* jsPsych 容器强制全屏居中 */
+        .jspsych-display-element {
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            height: 100vh !important;
+            width: 100vw !important;
+            background: black;
         }
         
+        /* 刺激显示容器 - 使用固定尺寸 */
+        .stimulus-display {
+            position: relative;
+            width: 500px;
+            height: 500px;
+            margin: 0 auto;
+        }
+        
+        /* 注视点 - 绝对定位在中心 */
         .fixation {
             width: 16px;
             height: 16px;
             background: white;
             border-radius: 50%;
             position: absolute;
-            z-index: 10;
+            left: 242px;
+            top: 242px;
+            z-index: 100;
         }
         
         .stim-container {
@@ -53,6 +63,7 @@
             border-radius: 50%;
             position: relative;
             overflow: hidden;
+            background: transparent;
         }
         
         /* 菱形 */
@@ -63,6 +74,7 @@
             transform: rotate(45deg);
             position: relative;
             overflow: hidden;
+            background: transparent;
         }
         
         /* 填充部分 */
@@ -82,15 +94,18 @@
             top: 0;
         }
         
-        /* 颜色 */
-        .red { border-color: rgb(255,0,0); background-color: rgb(255,0,0); }
-        .green { border-color: rgb(0,255,0); background-color: rgb(0,255,0); }
+        /* 颜色 - 边框色 + 填充背景色 */
+        .red { border-color: rgb(255,0,0); }
+        .green { border-color: rgb(0,255,0); }
         
-        /* 位置计算 (200px偏心距) */
-        .pos-0 { transform: translate(200px, 0); }   /* 右 */
-        .pos-1 { transform: translate(0, -200px); } /* 上 */
-        .pos-2 { transform: translate(-200px, 0); }  /* 左 */
-        .pos-3 { transform: translate(0, 200px); }    /* 下 */
+        .red .fill-left, .red .fill-right { background: rgb(255,0,0); }
+        .green .fill-left, .green .fill-right { background: rgb(0,255,0); }
+        
+        /* 四个位置 - 绝对像素定位（中心250,250，偏心距200px）*/
+        .pos-0 { left: 450px; top: 200px; }   /* 右：250+200=450 */
+        .pos-1 { left: 200px; top: 50px; }    /* 上：250-200=50 */
+        .pos-2 { left: 50px; top: 200px; }    /* 左：250-200=50 */
+        .pos-3 { left: 200px; top: 350px; }   /* 下：250+200=450 */
         
         .instruction-img { max-width: 90vw; max-height: 80vh; }
         .feedback-correct { color: #00ff00; font-size: 48px; }
@@ -179,18 +194,6 @@ class DataSaver {
         link.download = `${this.subjId}_HPL${this.highProbLoc}_${this.timeStr}.csv`;
         link.click();
         
-        // 方案2: 发送到服务器（取消注释使用）
-        /*
-        fetch('save_data.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                subjId: this.subjId,
-                data: this.dataBuffer
-            })
-        });
-        */
-        
         console.log('[数据已保存]');
         this.saved = true;
         return true;
@@ -231,7 +234,7 @@ function calcDist(idx1, idx2, total = 4) {
 // 生成刺激HTML
 function createStimulusHTML(shapeType, color, fillSide) {
     const colorClass = color === 'red' ? 'red' : 'green';
-    const fillHTML = `<div class="fill-${fillSide} ${colorClass}"></div>`;
+    const fillHTML = `<div class="fill-${fillSide}"></div>`;
     
     if (shapeType === 'circle') {
         return `<div class="circle-outline ${colorClass}">${fillHTML}</div>`;
@@ -289,7 +292,7 @@ function createDisplayHTML(targetLoc, targetShape, targetColor, targetFiller,
     }
     
     html += '</div>';
-    return { html, fillers };
+    return { html, fillers: fillers.map((f, i) => [i, f]) };
 }
 
 // =============================================================================
