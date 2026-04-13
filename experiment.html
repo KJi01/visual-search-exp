@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视觉搜索实验 - Ivanov & Theeuwes (2020)</title>
+    
+    <!-- jsPsych CDN -->
+    <script src="https://unpkg.com/jspsych@7.3.3"></script>
+    <link href="https://unpkg.com/jspsych@7.3.3/css/jspsych.css" rel="stylesheet">
+    <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@1.1.2"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-survey-text@1.1.2"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-instructions@1.1.2"></script>
+    <script src="https://unpkg.com/@jspsych/plugin-call-function@1.1.2"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background: black; }
+        .experiment-container { display: flex; justify-content: center; align-items: center; height: 100vh; }
+        
+        /* 刺激样式 */
+        .stimulus-display {
+            position: relative;
+            width: 600px;
+            height: 600px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .fixation {
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            z-index: 10;
+        }
+        
+        .stim-container {
+            position: absolute;
+            width: 100px;
+            height: 100px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        /* 圆形 */
+        .circle-outline {
+            width: 100px;
+            height: 100px;
+            border: 5px solid;
+            border-radius: 50%;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* 菱形 */
+        .diamond-outline {
+            width: 70px;
+            height: 70px;
+            border: 5px solid;
+            transform: rotate(45deg);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        /* 填充部分 */
+        .fill-left {
+            position: absolute;
+            width: 50%;
+            height: 100%;
+            left: 0;
+            top: 0;
+        }
+        
+        .fill-right {
+            position: absolute;
+            width: 50%;
+            height: 100%;
+            right: 0;
+            top: 0;
+        }
+        
+        /* 颜色 */
+        .red { border-color: rgb(255,0,0); background-color: rgb(255,0,0); }
+        .green { border-color: rgb(0,255,0); background-color: rgb(0,255,0); }
+        
+        /* 位置计算 (200px偏心距) */
+        .pos-0 { transform: translate(200px, 0); }   /* 右 */
+        .pos-1 { transform: translate(0, -200px); } /* 上 */
+        .pos-2 { transform: translate(-200px, 0); }  /* 左 */
+        .pos-3 { transform: translate(0, 200px); }    /* 下 */
+        
+        .instruction-img { max-width: 90vw; max-height: 80vh; }
+        .feedback-correct { color: #00ff00; font-size: 48px; }
+        .feedback-wrong { color: #ff0000; font-size: 48px; }
+    </style>
+</head>
+<body>
+<script>
+// =============================================================================
+// 全局参数（与原Python代码对应）
+// =============================================================================
+const PARAMS = {
+    STIMULUS_SIZE: 100,
+    CIRCLE_RADIUS: 50,
+    DIAMOND_SIZE: 58,
+    FIXATION_RADIUS: 8,
+    STIM_ECCENTRICITY: 200,
+    FIXATION_MIN: 500,
+    FIXATION_MAX: 750,
+    MAX_RESPONSE_TIME: 3000,
+    N_BLOCKS: 3,
+    TRIALS_PER_BLOCK: 200,
+    PRACTICE_TRIALS: 18,
+    M_BLOCK_SIZE: 50,
+    KEY_LEFT: 'a',
+    KEY_RIGHT: 'l',
+    KEY_QUIT: 'escape',
+    KEY_SKIP: 'tab'
+};
+
+// 颜色定义
+const COLORS = {
+    red: 'rgb(255,0,0)',
+    green: 'rgb(0,255,0)',
+    black: 'black',
+    white: 'white'
+};
+
+// =============================================================================
+// 数据保存类（对应原DataSaver）
+// =============================================================================
+class DataSaver {
+    constructor(subjId, highProbLoc) {
+        this.subjId = subjId;
+        this.highProbLoc = highProbLoc;
+        this.timeStr = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
+        this.dataBuffer = [];
+        this.saved = false;
+        
+        // 自动保存机制（页面关闭前）
+        window.addEventListener('beforeunload', (e) => {
+            if (!this.saved && this.dataBuffer.length > 0) {
+                this.emergencySave();
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+    }
+    
+    addTrial(trialData) {
+        this.dataBuffer.push(trialData);
+    }
+    
+    emergencySave() {
+        if (this.saved || this.dataBuffer.length === 0) return;
+        
+        const csv = this.convertToCSV(this.dataBuffer);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `EMERGENCY_${this.subjId}_HPL${this.highProbLoc}_${this.timeStr}.csv`;
+        link.click();
+        
+        console.log('[紧急保存完成]');
+        this.saved = true;
+    }
+    
+    finalize() {
+        if (this.dataBuffer.length === 0 || this.saved) return false;
+        
+        // 方案1: 本地下载（测试用）
+        const csv = this.convertToCSV(this.dataBuffer);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `${this.subjId}_HPL${this.highProbLoc}_${this.timeStr}.csv`;
+        link.click();
+        
+        // 方案2: 发送到服务器（取消注释使用）
+        /*
+        fetch('save_data.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                subjId: this.subjId,
+                data: this.dataBuffer
+            })
+        });
+        */
+        
+        console.log('[数据已保存]');
+        this.saved = true;
+        return true;
+    }
+    
+    convertToCSV(data) {
+        if (data.length === 0) return '';
+        const headers = Object.keys(data[0]);
+        const rows = data.map(row => headers.map(h => {
+            const val = row[h];
+            return (val === null || val === undefined) ? '' : 
+                   (typeof val === 'string' && val.includes(',') ? `"${val}"` : val);
+        }).join(','));
+        return [headers.join(','), ...rows].join('\n');
+    }
+}
+
+// =============================================================================
+// 辅助函数（对应原Python函数）
+// =============================================================================
+
+// 计算圆上的位置
+function posOnCircle(center, radius, angleDeg) {
+    const rad = angleDeg * Math.PI / 180;
+    return [
+        center[0] + radius * Math.cos(rad),
+        center[1] + radius * Math.sin(rad)
+    ];
+}
+
+// 计算距离（环形距离）
+function calcDist(idx1, idx2, total = 4) {
+    if (idx1 === null || idx2 === null) return -1;
+    const diff = Math.abs(idx1 - idx2);
+    return Math.min(diff, total - diff);
+}
+
+// 生成刺激HTML
+function createStimulusHTML(shapeType, color, fillSide) {
+    const colorClass = color === 'red' ? 'red' : 'green';
+    const fillHTML = `<div class="fill-${fillSide} ${colorClass}"></div>`;
+    
+    if (shapeType === 'circle') {
+        return `<div class="circle-outline ${colorClass}">${fillHTML}</div>`;
+    } else {
+        return `<div class="diamond-outline ${colorClass}">${fillHTML}</div>`;
+    }
+}
+
+// 生成完整显示HTML
+function createDisplayHTML(targetLoc, targetShape, targetColor, targetFiller, 
+                          distPresent, distLoc, distShape, distColor, distFiller) {
+    // 确定4个位置的填充
+    const fillers = new Array(4).fill(null);
+    fillers[targetLoc] = targetFiller;
+    if (distPresent) fillers[distLoc] = distFiller;
+    
+    // 平衡填充：确保2个left, 2个right
+    let leftCount = fillers.filter(f => f === 'left').length;
+    const needLeft = 2 - leftCount;
+    const needRight = 2 - (4 - leftCount - fillers.filter(f => f === null).length);
+    
+    const emptyLocs = fillers.map((f, i) => f === null ? i : -1).filter(i => i !== -1);
+    const emptyFillers = Array(needLeft).fill('left').concat(Array(needRight).fill('right'));
+    // 随机打乱
+    for (let i = emptyFillers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [emptyFillers[i], emptyFillers[j]] = [emptyFillers[j], emptyFillers[i]];
+    }
+    emptyLocs.forEach((loc, i) => fillers[loc] = emptyFillers[i]);
+    
+    // 生成HTML
+    let html = '<div class="stimulus-display">';
+    html += '<div class="fixation"></div>';
+    
+    for (let i = 0; i < 4; i++) {
+        let shape, color, filler;
+        if (i === targetLoc) {
+            shape = targetShape;
+            color = targetColor;
+            filler = targetFiller;
+        } else if (distPresent && i === distLoc) {
+            shape = distShape;
+            color = distColor;
+            filler = distFiller;
+        } else {
+            // 干扰项：形状与目标相反，颜色与目标相同
+            shape = targetShape === 'circle' ? 'diamond' : 'circle';
+            color = targetColor;
+            filler = fillers[i];
+        }
+        
+        html += `<div class="stim-container pos-${i}">`;
+        html += createStimulusHTML(shape, color, filler);
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    return { html, fillers };
+}
+
+// =============================================================================
+// SwitchMetrics 类（对应原Python类）
+// =============================================================================
+class SwitchMetrics {
+    constructor() {
+        this.prevTrial = null;
+        this.counters = {
+            target_shape: 0, target_color: 0, target_filler: 0, target_location: 0
+        };
+        this.distFillerCounter = 0;
+        this.congruencyCounter = 0;
+        this.prevHasDist = false;
+    }
+    
+    calculate(currHasDist, currTargetShape, currTargetColor, 
+              currTargetFiller, currTargetLoc, currDistFiller, currCongruent) {
+        const metrics = {};
+        
+        if (this.prevTrial === null) {
+            Object.keys(this.counters).forEach(key => {
+                metrics[`switch_${key}`] = 0;
+            });
+        } else {
+            const keys = ['target_shape', 'target_color', 'target_filler', 'target_location'];
+            const currVals = [currTargetShape, currTargetColor, currTargetFiller, currTargetLoc];
+            const prevVals = [this.prevTrial.target_shape, this.prevTrial.target_color, 
+                            this.prevTrial.target_filler, this.prevTrial.target_loc];
+            
+            keys.forEach((key, i) => {
+                if (prevVals[i] === currVals[i]) {
+                    this.counters[key]++;
+                } else {
+                    this.counters[key] = 0;
+                }
+                metrics[`switch_${key}`] = this.counters[key];
+            });
+        }
+        
+        if (!currHasDist) {
+            metrics.switch_dist_filler = -1;
+            metrics.switch_congruency = -1;
+        } else {
+            if (this.prevTrial === null || !this.prevHasDist) {
+                this.distFillerCounter = 0;
+                this.congruencyCounter = 0;
+            } else {
+                if (this.prevTrial.dist_filler === currDistFiller) {
+                    this.distFillerCounter++;
+                } else {
+                    this.distFillerCounter = 0;
+                }
+                if (this.prevTrial.congruent === currCongruent) {
+                    this.congruencyCounter++;
+                } else {
+                    this.congruencyCounter = 0;
+                }
+            }
+            metrics.switch_dist_filler = this.distFillerCounter;
+            metrics.switch_congruency = this.congruencyCounter;
+        }
+        
+        this.prevTrial = {
+            target_shape: currTargetShape, target_color: currTargetColor,
+            target_filler: currTargetFiller, target_loc: currTargetLoc,
+            dist_filler: currDistFiller, congruent: currCongruent
+        };
+        this.prevHasDist = currHasDist;
+        
+        return metrics;
+    }
+}
+
+// =============================================================================
+// 试次生成函数（对应原gen_trials）
+// =============================================================================
+function genTrials(highProbLoc, isPractice = false) {
+    const trials = [];
+    
+    if (isPractice) {
+        for (let i = 0; i < PARAMS.PRACTICE_TRIALS; i++) {
+            const hasDist = Math.random() < 0.8;
+            let distLoc, targetLoc;
+            if (hasDist) {
+                distLoc = Math.floor(Math.random() * 4);
+                const possible = [0,1,2,3].filter(x => x !== distLoc);
+                targetLoc = possible[Math.floor(Math.random() * possible.length)];
+            } else {
+                distLoc = null;
+                targetLoc = Math.floor(Math.random() * 4);
+            }
+            
+            trials.push({
+                dist_present: hasDist,
+                dist_loc: distLoc,
+                target_loc: targetLoc,
+                target_color: Math.random() < 0.5 ? 'green' : 'red',
+                target_shape: Math.random() < 0.5 ? 'circle' : 'diamond',
+                target_filler: Math.random() < 0.5 ? 'left' : 'right',
+                dist_color: hasDist ? (Math.random() < 0.5 ? 'green' : 'red') : null,
+                dist_shape: hasDist ? (Math.random() < 0.5 ? 'circle' : 'diamond') : null,
+                dist_filler: hasDist ? (Math.random() < 0.5 ? 'left' : 'right') : null,
+                loc_type: 'practice'
+            });
+        }
+    } else {
+        const otherLocs = [0,1,2,3].filter(i => i !== highProbLoc);
+        
+        // 无干扰试次：每个位置10个
+        for (let loc = 0; loc < 4; loc++) {
+            for (let i = 0; i < 10; i++) {
+                trials.push({
+                    dist_present: false,
+                    dist_loc: null,
+                    target_loc: loc,
+                    target_color: Math.random() < 0.5 ? 'green' : 'red',
+                    target_shape: Math.random() < 0.5 ? 'circle' : 'diamond',
+                    target_filler: Math.random() < 0.5 ? 'left' : 'right',
+                    dist_color: null, dist_shape: null, dist_filler: null,
+                    loc_type: 'none'
+                });
+            }
+        }
+        
+        // 生成所有干扰条件组合
+        const conds = [];
+        ['green', 'red'].forEach(dc => {
+            ['circle', 'diamond'].forEach(ds => {
+                ['left', 'right'].forEach(df => {
+                    ['left', 'right'].forEach(tf => {
+                        conds.push({ dc, ds, df, tf });
+                    });
+                });
+            });
+        });
+        
+        // 高概率位置：每个条件重复7次
+        for (let i = 0; i < 7; i++) {
+            conds.forEach(c => {
+                trials.push({
+                    dist_present: true,
+                    dist_loc: highProbLoc,
+                    target_loc: null,
+                    target_color: null,
+                    target_shape: null,
+                    target_filler: c.tf,
+                    dist_color: c.dc,
+                    dist_shape: c.ds,
+                    dist_filler: c.df,
+                    loc_type: 'high'
+                });
+            });
+        }
+        
+        // 低概率位置：每个条件1次
+        otherLocs.forEach(loc => {
+            conds.forEach(c => {
+                trials.push({
+                    dist_present: true,
+                    dist_loc: loc,
+                    target_loc: null,
+                    target_color: null,
+                    target_shape: null,
+                    target_filler: c.tf,
+                    dist_color: c.dc,
+                    dist_shape: c.ds,
+                    dist_filler: c.df,
+                    loc_type: 'low'
+                });
+            });
+        });
+    }
+    
+    // 随机打乱
+    for (let i = trials.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [trials[i], trials[j]] = [trials[j], trials[i]];
+    }
+    
+    return trials;
+}
+
+// 完成试次参数（对应原finalize_trial）
+function finalizeTrial(info) {
+    const p = { ...info };
+    if (p.dist_present) {
+        if (p.target_loc === null) {
+            const possible = [0,1,2,3].filter(x => x !== p.dist_loc);
+            p.target_loc = possible[Math.floor(Math.random() * possible.length)];
+        }
+        p.target_color = p.dist_color === 'green' ? 'red' : 'green';
+        p.target_shape = p.dist_shape === 'circle' ? 'diamond' : 'circle';
+        p.congruent = (p.target_filler === p.dist_filler) ? 1 : 0;
+    } else {
+        p.congruent = -1;
+        if (p.target_loc === null) p.target_loc = Math.floor(Math.random() * 4);
+        if (p.target_shape === null) {
+            p.target_shape = Math.random() < 0.5 ? 'circle' : 'diamond';
+            p.target_color = Math.random() < 0.5 ? 'green' : 'red';
+            p.target_filler = Math.random() < 0.5 ? 'left' : 'right';
+        }
+    }
+    return p;
+}
+
+// =============================================================================
+// 主实验流程
+// =============================================================================
+
+let dataSaver;
+let totalTrialCount = 0;
+let subjId, highProbLoc;
+let switchTracker;
+
+// 初始化 jsPsych
+const jsPsych = initJsPsych({
+    on_finish: function() {
+        if (dataSaver) dataSaver.finalize();
+    }
+});
+
+// 被试信息收集
+const subjInfoTrial = {
+    type: jsPsychSurveyText,
+    preamble: '<h2>被试信息</h2>',
+    questions: [
+        { prompt: '被试编号（数字）:', name: 'participant', required: true },
+        { prompt: '年龄:', name: 'age' },
+        { prompt: '性别（male/female/other）:', name: 'gender' },
+        { prompt: '利手（right/left）:', name: 'handedness' }
+    ],
+    on_finish: function(data) {
+        const subjNum = parseInt(data.response.participant) || 1;
+        subjId = `P${String(subjNum).padStart(3, '0')}`;
+        highProbLoc = (subjNum - 1) % 4;
+        
+        console.log(`被试: ${subjId} | 高概率位置: ${highProbLoc * 90}°`);
+        dataSaver = new DataSaver(subjId, highProbLoc);
+        switchTracker = new SwitchMetrics();
+    }
+};
+
+// 指导语
+const instructions = {
+    type: jsPsychInstructions,
+    pages: [
+        `<div style="color: white; text-align: left; max-width: 800px; font-size: 24px; line-height: 1.6;">
+            <h2 style="text-align: center;">任务说明</h2>
+            <p>1. 找出<strong>独特形状</strong>（3个相同，1个不同）</p>
+            <p>2. <strong>忽略颜色干扰</strong>（与目标颜色相反的是干扰物）</p>
+            <p>3. 判断填充方向：<br>
+               &nbsp;&nbsp;左填充 ← 按 <strong>A</strong> 键<br>
+               &nbsp;&nbsp;右填充 → 按 <strong>L</strong> 键</p>
+            <p style="color: #aaa; margin-top: 30px;">提示：找唯一，看方向，颜色是干扰</p>
+            <p style="text-align: center; margin-top: 40px; color: #0f0;">按 → 继续</p>
+        </div>`
+    ],
+    key_forward: 'ArrowRight',
+    allow_backward: false,
+    show_clickable_nav: false
+};
+
+// 生成试次的时间轴
+function createTrialTimeline(trials, isPractice = false, blockNum = 0) {
+    const timeline = [];
+    let correctCount = 0;
+    let practiceSwitch = new SwitchMetrics();
+    
+    trials.forEach((trialInfo, idx) => {
+        // 注视点
+        const fixation = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: '<div class="stimulus-display"><div class="fixation"></div></div>',
+            choices: 'NO_KEYS',
+            trial_duration: () => PARAMS.FIXATION_MIN + Math.random() * (PARAMS.FIXATION_MAX - PARAMS.FIXATION_MIN),
+            data: { phase: 'fixation' }
+        };
+        
+        // 刺激呈现
+        const stimulus = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: function() {
+                const p = finalizeTrial(trialInfo);
+                const display = createDisplayHTML(
+                    p.target_loc, p.target_shape, p.target_color, p.target_filler,
+                    p.dist_present, p.dist_loc, p.dist_shape, p.dist_color, p.dist_filler
+                );
+                
+                // 保存当前试次参数供后续使用
+                jsPsych.data.get().addToLast({
+                    current_trial: p,
+                    fillers: display.fillers
+                });
+                
+                return display.html;
+            },
+            choices: [PARAMS.KEY_LEFT, PARAMS.KEY_RIGHT, PARAMS.KEY_QUIT, PARAMS.KEY_SKIP],
+            trial_duration: PARAMS.MAX_RESPONSE_TIME,
+            response_ends_trial: true,
+            on_finish: function(data) {
+                const p = jsPsych.data.get().last(1).values()[0].current_trial;
+                const fillers = jsPsych.data.get().last(1).values()[0].fillers;
+                
+                // 判断反应
+                const correctKey = p.target_filler === 'left' ? PARAMS.KEY_LEFT : PARAMS.KEY_RIGHT;
+                let correct = false;
+                let rt = null;
+                let resp = null;
+                
+                if (data.response) {
+                    resp = data.response;
+                    if (resp === PARAMS.KEY_QUIT) {
+                        jsPsych.endExperiment('实验已退出');
+                        return;
+                    }
+                    if (resp === PARAMS.KEY_SKIP) {
+                        data.skipped = true;
+                        return;
+                    }
+                    rt = data.rt;
+                    correct = (resp === correctKey);
+                }
+                
+                // 反馈（仅练习）
+                if (isPractice) {
+                    data.correct = correct;
+                    data.show_feedback = true;
+                }
+                
+                // 计算指标
+                const dHigh = calcDist(p.dist_loc, highProbLoc);
+                const tHigh = calcDist(p.target_loc, highProbLoc);
+                const tDist = calcDist(p.target_loc, p.dist_loc);
+                
+                const tracker = isPractice ? practiceSwitch : switchTracker;
+                const switchM = tracker.calculate(
+                    p.dist_present, p.target_shape, p.target_color,
+                    p.target_filler, p.target_loc, p.dist_filler, p.congruent
+                );
+                
+                // 记录数据
+                if (!isPractice) totalTrialCount++;
+                
+                const trialData = {
+                    subject_id: subjId,
+                    block: isPractice ? 'practice' : blockNum,
+                    trial: idx + 1,
+                    trial_total: isPractice ? 0 : totalTrialCount,
+                    m_block: isPractice ? 0 : Math.floor(idx / PARAMS.M_BLOCK_SIZE) + 1,
+                    trial_in_m_block: isPractice ? 0 : (idx % PARAMS.M_BLOCK_SIZE) + 1,
+                    high_prob_loc: highProbLoc,
+                    loc_type: p.loc_type,
+                    dist_present: p.dist_present,
+                    congruent: p.congruent,
+                    correct: correct ? 1 : 0,
+                    rt: rt ? rt * 1000 : null,
+                    target_loc: p.target_loc,
+                    target_shape: p.target_shape,
+                    target_color: p.target_color,
+                    target_filler: p.target_filler,
+                    dist_loc: p.dist_loc,
+                    dist_shape: p.dist_shape,
+                    dist_color: p.dist_color,
+                    dist_filler: p.dist_filler,
+                    loc0_filler: fillers[0][1],
+                    loc1_filler: fillers[1][1],
+                    loc2_filler: fillers[2][1],
+                    loc3_filler: fillers[3][1],
+                    dist_to_high_dist: dHigh,
+                    target_to_high_dist: tHigh,
+                    target_to_dist_dist: tDist,
+                    ...switchM,
+                    response: resp
+                };
+                
+                dataSaver.addTrial(trialData);
+                if (correct) correctCount++;
+            }
+        };
+        
+        // 反馈（仅练习）
+        const feedback = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: function() {
+                const last = jsPsych.data.get().last(1).values()[0];
+                if (last.correct) {
+                    return '<div class="feedback-correct">正确！</div>';
+                } else {
+                    return '<div class="feedback-wrong">错误！</div>';
+                }
+            },
+            choices: 'NO_KEYS',
+            trial_duration: 500,
+            conditional_function: function() {
+                return isPractice && jsPsych.data.get().last(1).values()[0].show_feedback;
+            }
+        };
+        
+        timeline.push(fixation, stimulus, feedback);
+    });
+    
+    return timeline;
+}
+
+// 练习模块
+const practiceBlock = {
+    timeline: function() {
+        const trials = genTrials(highProbLoc, true);
+        return createTrialTimeline(trials, true);
+    },
+    loop_function: function(data) {
+        // 计算准确率
+        const practiceData = data.values().filter(d => d.phase !== 'fixation' && d.correct !== undefined);
+        const correct = practiceData.filter(d => d.correct).length;
+        const total = practiceData.length;
+        const acc = total > 0 ? (correct / total * 100) : 0;
+        
+        console.log(`练习准确率: ${acc.toFixed(1)}%`);
+        
+        // 检查是否跳过
+        const skipped = practiceData.some(d => d.skipped);
+        if (skipped) return false;
+        
+        // 准确率≥80%则退出循环
+        return acc < 80;
+    },
+    on_start: function() {
+        // 显示练习提示
+        jsPsych.getDisplayElement().innerHTML = `
+            <div style="color: white; text-align: center; font-size: 28px; padding-top: 40vh;">
+                开始练习<br><br>
+                <span style="font-size: 20px; color: #aaa;">按 Tab 可跳过练习</span>
+            </div>
+        `;
+    }
+};
+
+// 正式实验前提示
+const preExpInstructions = {
+    type: jsPsychHtmlKeyboardResponse,
+    stimulus: `<div style="color: white; text-align: center; font-size: 24px; line-height: 1.8; max-width: 900px;">
+        <h2>准备开始正式实验（共3组）</h2>
+        <p>每组实验约7分钟，需要全程保证专注</p>
+        <p>每组结束显示休息画面，请休息至少一分钟</p>
+        <p style="color: #0f0; margin-top: 40px;">准备好后按空格键开始...</p>
+    </div>`,
+    choices: [' ']
+};
+
+// 生成3个block
+const experimentBlocks = [];
+for (let block = 1; block <= PARAMS.N_BLOCKS; block++) {
+    const blockTrials = genTrials(highProbLoc, false);
+    const blockTimeline = createTrialTimeline(blockTrials, false, block);
+    
+    // Block开始提示
+    experimentBlocks.push({
+        type: jsPsychHtmlKeyboardResponse,
+        stimulus: `<div style="color: white; text-align: center; font-size: 28px; padding-top: 40vh;">
+            第 ${block} / ${PARAMS.N_BLOCKS} 组<br><br>
+            <span style="font-size: 20px; color: #aaa;">按空格键开始</span>
+        </div>`,
+        choices: [' ']
+    });
+    
+    // Block试次
+    experimentBlocks.push(...blockTimeline);
+    
+    // Block结束休息
+    if (block < PARAMS.N_BLOCKS) {
+        experimentBlocks.push({
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: `<div style="color: white; text-align: center; font-size: 24px; line-height: 1.8;">
+                <h2>第${block}组已完成</h2>
+                <p>请休息2-3分钟，活动一下肩颈</p>
+                <p style="color: #0f0; margin-top: 30px;">休息好后按空格键继续...</p>
+            </div>`,
+            choices: [' ']
+        });
+    }
+}
+
+// 结束界面
+const endScreen = {
+    type: jsPsychCallFunction,
+    func: function() {
+        // 计算统计信息
+        const allData = dataSaver.dataBuffer;
+        const finalData = allData.filter(d => d.block !== 'practice');
+        const blockAccs = [1, 2, 3].map(b => {
+            const blockData = finalData.filter(d => d.block === b && d.correct !== null);
+            if (blockData.length === 0) return 0;
+            return blockData.filter(d => d.correct === 1).length / blockData.length * 100;
+        });
+        const overall = finalData.length > 0 ? 
+            finalData.filter(d => d.correct === 1).length / finalData.length * 100 : 0;
+        
+        // 显示结果
+        jsPsych.getDisplayElement().innerHTML = `
+            <div style="color: white; text-align: center; font-size: 24px; line-height: 2;">
+                <h2>实验结束</h2>
+                <p>第1组: ${blockAccs[0].toFixed(1)}% | 第2组: ${blockAccs[1].toFixed(1)}% | 第3组: ${blockAccs[2].toFixed(1)}%</p>
+                <p>总正确率: ${overall.toFixed(1)}%</p>
+                <p style="color: #0f0; margin-top: 30px;">感谢参与！</p>
+                <p style="font-size: 16px; color: #666; margin-top: 20px;">数据已自动下载</p>
+            </div>
+        `;
+        
+        console.log(`\n实验完成\n第1组: ${blockAccs[0].toFixed(1)}% | 第2组: ${blockAccs[1].toFixed(1)}% | 第3组: ${blockAccs[2].toFixed(1)}%`);
+        console.log(`总正确率: ${overall.toFixed(1)}%`);
+    }
+};
+
+// 组装完整时间轴
+const fullTimeline = [
+    subjInfoTrial,
+    instructions,
+    practiceBlock,
+    preExpInstructions,
+    ...experimentBlocks,
+    endScreen
+];
+
+// 运行实验
+jsPsych.run(fullTimeline);
+</script>
+</body>
+</html>
